@@ -5,15 +5,19 @@ import { join } from "node:path"
 
 const STATE_DIR = join(homedir(), ".config", "opencode")
 const STATE_FILE = join(STATE_DIR, "timeout-limiter.json")
-const DEFAULT_LIMIT_MS = 15_000
+const DEFAULT_LIMIT_MS = 5_000
 const DEFAULT_EXCLUDED = ["question", "task"]
 const MIN_LIMIT_MS = 100
 const MAX_LIMIT_MS = 600_000
 
-type State = { limitMs: number; excluded: string[]; disabled: boolean }
+type State = {
+  limitMs: number
+  excluded: string[]
+  disabled: boolean
+  perToolCallReset: boolean
+  oneShotMs: number | null
+}
 
-// The server plugin reads the same file on every tool call, so writing it
-// here takes effect immediately, in every location.
 function loadState(): State {
   try {
     const raw = readFileSync(STATE_FILE, "utf8")
@@ -25,9 +29,24 @@ function loadState(): State {
     const excluded = Array.isArray(parsed.excluded)
       ? parsed.excluded.filter((x): x is string => typeof x === "string")
       : [...DEFAULT_EXCLUDED]
-    return { limitMs, excluded, disabled: parsed.disabled === true }
+    return {
+      limitMs,
+      excluded,
+      disabled: parsed.disabled === true,
+      perToolCallReset: parsed.perToolCallReset !== false,
+      oneShotMs:
+        typeof parsed.oneShotMs === "number" && parsed.oneShotMs > 0
+          ? Math.min(Math.max(parsed.oneShotMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
+          : null,
+    }
   } catch {
-    return { limitMs: DEFAULT_LIMIT_MS, excluded: [...DEFAULT_EXCLUDED], disabled: false }
+    return {
+      limitMs: DEFAULT_LIMIT_MS,
+      excluded: [...DEFAULT_EXCLUDED],
+      disabled: false,
+      perToolCallReset: true,
+      oneShotMs: null,
+    }
   }
 }
 
@@ -40,7 +59,6 @@ function saveState(state: State): void {
   }
 }
 
-// Accepts "15s", "15", "15000ms", "1m". Returns milliseconds, clamped.
 function parseDuration(raw: string): number | undefined {
   const text = raw.trim().toLowerCase()
   if (!text) return undefined
@@ -55,20 +73,20 @@ function parseDuration(raw: string): number | undefined {
 
 function summary(state: State): string {
   const status = state.disabled ? "DISABLED" : "ENABLED"
-  const excluded = state.excluded.join(", ") || "(none)"
-  return `${status} · limit ${state.limitMs}ms (${state.limitMs / 1000}s) · excluded: ${excluded}`
+  const parts = [`${status}`, `limit ${state.limitMs}ms (${state.limitMs / 1000}s)`]
+  if (state.oneShotMs) {
+    parts.push(`next call: ${state.oneShotMs}ms (${state.oneShotMs / 1000}s)`)
+  }
+  parts.push(`per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`)
+  parts.push(`excluded: ${state.excluded.join(", ") || "(none)"}`)
+  return parts.join(" · ")
 }
 
 export default Plugin.define({
   id: "timeout-limiter.tui",
   setup(context: any) {
-    // The server also loads this file. Only the terminal has a keymap and a
-    // toast, so the server side does nothing.
     if (!context?.keymap?.layer || !context?.ui?.toast) return
 
-    // These run entirely in the terminal: no server round trip, no model, no
-    // session message. The status is read from and written to the same state
-    // file the server plugin uses.
     context.keymap.layer(() => ({
       mode: "global",
       priority: 10,
@@ -106,15 +124,27 @@ export default Plugin.define({
               return
             }
             const state = loadState()
-            state.limitMs = ms
-            state.disabled = false
-            saveState(state)
-            context.ui.toast.show({
-              title: "timeout-limiter",
-              message: `Limit set to ${ms}ms (${ms / 1000}s). Limiter enabled.`,
-              variant: "success",
-              duration: 5000,
-            })
+            if (state.perToolCallReset) {
+              state.oneShotMs = ms
+              state.disabled = false
+              saveState(state)
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: `Next call only: ${ms}ms (${ms / 1000}s). Then reverts to ${state.limitMs}ms.`,
+                variant: "success",
+                duration: 6000,
+              })
+            } else {
+              state.limitMs = ms
+              state.disabled = false
+              saveState(state)
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: `Hard limit set to ${ms}ms (persistent).`,
+                variant: "success",
+                duration: 5000,
+              })
+            }
           },
         },
         {
@@ -129,10 +159,45 @@ export default Plugin.define({
             saveState(state)
             context.ui.toast.show({
               title: "timeout-limiter",
-              message:
-                "DISABLED. Tool calls are no longer killed. Use /set-timeout-limiter <n>s to turn it back on.",
+              message: "DISABLED. Tool calls are no longer killed. Use /set-timeout-limiter <n>s to turn it back on.",
               variant: "warning",
               duration: 8000,
+            })
+          },
+        },
+        {
+          id: "timeout-limiter.reset-disable",
+          title: "Disable per-tool-call reset",
+          group: "Timeout limiter",
+          slash: { name: "disable-per-toolcall-reset" },
+          enabled: () => true,
+          run: () => {
+            const state = loadState()
+            state.perToolCallReset = false
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: "Per-tool-call reset OFF. /set-timeout-limiter now sets a persistent limit.",
+              variant: "success",
+              duration: 6000,
+            })
+          },
+        },
+        {
+          id: "timeout-limiter.reset-enable",
+          title: "Enable per-tool-call reset",
+          group: "Timeout limiter",
+          slash: { name: "enable-per-toolcall-reset" },
+          enabled: () => true,
+          run: () => {
+            const state = loadState()
+            state.perToolCallReset = true
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: "Per-tool-call reset ON. /set-timeout-limiter now applies to the next call only.",
+              variant: "success",
+              duration: 6000,
             })
           },
         },

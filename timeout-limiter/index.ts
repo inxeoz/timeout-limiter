@@ -4,12 +4,18 @@ import { join } from "node:path"
 
 const STATE_DIR = join(homedir(), ".config", "opencode")
 const STATE_FILE = join(STATE_DIR, "timeout-limiter.json")
-const DEFAULT_LIMIT_MS = 15_000
+const DEFAULT_LIMIT_MS = 5_000
 const DEFAULT_EXCLUDED = ["question", "task"]
 const MIN_LIMIT_MS = 100
 const MAX_LIMIT_MS = 600_000
 
-type State = { limitMs: number; excluded: string[]; disabled: boolean }
+type State = {
+  limitMs: number
+  excluded: string[]
+  disabled: boolean
+  perToolCallReset: boolean
+  oneShotMs: number | null
+}
 
 // The state file is the only source of truth. Every location loads its own
 // copy of this plugin, so the file is read fresh instead of cached.
@@ -24,9 +30,24 @@ function loadState(): State {
     const excluded = Array.isArray(parsed.excluded)
       ? parsed.excluded.filter((x): x is string => typeof x === "string")
       : [...DEFAULT_EXCLUDED]
-    return { limitMs, excluded, disabled: parsed.disabled === true }
+    return {
+      limitMs,
+      excluded,
+      disabled: parsed.disabled === true,
+      perToolCallReset: parsed.perToolCallReset !== false,
+      oneShotMs:
+        typeof parsed.oneShotMs === "number" && parsed.oneShotMs > 0
+          ? Math.min(Math.max(parsed.oneShotMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
+          : null,
+    }
   } catch {
-    return { limitMs: DEFAULT_LIMIT_MS, excluded: [...DEFAULT_EXCLUDED], disabled: false }
+    return {
+      limitMs: DEFAULT_LIMIT_MS,
+      excluded: [...DEFAULT_EXCLUDED],
+      disabled: false,
+      perToolCallReset: true,
+      oneShotMs: null,
+    }
   }
 }
 
@@ -39,6 +60,19 @@ function saveState(state: State): void {
   }
 }
 
+// Accepts "15s", "15", "15000ms", "1m". Returns milliseconds, clamped.
+function parseDuration(raw: string): number | undefined {
+  const text = raw.trim().toLowerCase()
+  if (!text) return undefined
+  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/.exec(text)
+  if (!match) return undefined
+  const value = Number(match[1])
+  if (!Number.isFinite(value) || value <= 0) return undefined
+  const unit = match[2] ?? "s"
+  const ms = unit === "ms" ? value : unit === "m" ? value * 60_000 : value * 1_000
+  return Math.min(Math.max(Math.round(ms), MIN_LIMIT_MS), MAX_LIMIT_MS)
+}
+
 // A tool is excluded when its short name or its namespaced id matches.
 function matches(name: string, id: string, list: string[]): boolean {
   for (const entry of list) {
@@ -48,14 +82,18 @@ function matches(name: string, id: string, list: string[]): boolean {
 }
 
 function describe(state: State): string {
-  return [
-    `timeout-limiter: ${state.disabled ? "DISABLED" : "ENABLED"}`,
-    `  limit: ${state.limitMs}ms (${state.limitMs / 1000}s)`,
-    `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
-    `  state file: ${STATE_FILE}`,
-    `  change it with /set-timeout-limiter <seconds>s,`,
-    `  turn it off with /disable-timeout-limiter, show it with /show-timeout-limiter`,
-  ].join("\n")
+  const status = state.disabled ? "DISABLED" : "ENABLED"
+  const lines = [
+    `timeout-limiter: ${status}`,
+    `  normal limit: ${state.limitMs}ms (${state.limitMs / 1000}s)`,
+  ]
+  if (state.oneShotMs) {
+    lines.push(`  next call only: ${state.oneShotMs}ms (${state.oneShotMs / 1000}s)`)
+  }
+  lines.push(`  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`)
+  lines.push(`  excluded tools: ${state.excluded.join(", ") || "(none)"}`)
+  lines.push(`  state file: ${STATE_FILE}`)
+  return lines.join("\n")
 }
 
 export default {
@@ -74,17 +112,23 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
-          const state = loadState()
           const ms = Math.min(
             Math.max(Math.round(Number(input.time_in_sec) * 1000), MIN_LIMIT_MS),
             MAX_LIMIT_MS,
           )
-          state.limitMs = ms
+          const state = loadState()
+          if (state.perToolCallReset) {
+            state.oneShotMs = ms
+          } else {
+            state.limitMs = ms
+          }
           state.disabled = false
           saveState(state)
           return {
-            content: `Hard timeout limit set to ${ms}ms.`,
-            metadata: { limitMs: ms, disabled: false },
+            content: state.perToolCallReset
+              ? `Next tool call only: ${ms}ms (${ms / 1000}s). Limiter enabled. Reverts to ${state.limitMs}ms after.`
+              : `Hard timeout limit set to ${ms}ms (persistent). Limiter enabled.`,
+            metadata: { limitMs: state.limitMs, oneShotMs: state.oneShotMs, disabled: false },
           }
         },
       })
@@ -155,16 +199,15 @@ export default {
             content: describe(state),
             metadata: {
               limitMs: state.limitMs,
+              oneShotMs: state.oneShotMs,
               disabled: state.disabled,
+              perToolCallReset: state.perToolCallReset,
               excluded: state.excluded,
             },
           }
         },
       })
     })
-
-    // Slash commands live in tui.ts: they run in the terminal, so they show
-    // the status without waking the model and without touching the session.
 
     // Deadline for every tool call. The call is aborted and fails with a
     // message the agent can act on; the session keeps running.
@@ -182,8 +225,12 @@ export default {
           definition.execute = async (input: any, context: any) => {
             // Read fresh: the state is shared by every location.
             const state = loadState()
-            const limit = state.disabled ? 0 : state.limitMs
-            if (!limit || matches(name, id, state.excluded)) {
+            const limit = state.disabled ? 0 : (state.oneShotMs ?? state.limitMs)
+            const isExcluded = matches(name, id, state.excluded)
+            const oneShotUsed =
+              !state.disabled && !isExcluded && state.oneShotMs !== null
+
+            if (!limit || isExcluded) {
               return original(input, context)
             }
 
@@ -223,6 +270,14 @@ export default {
               ])
             } finally {
               if (timer) clearTimeout(timer)
+              // Consume the one-shot override after the call, whether it
+              // succeeded, failed, or timed out. Excluded tools leave it in
+              // place for the next call.
+              if (oneShotUsed) {
+                const s = loadState()
+                s.oneShotMs = null
+                saveState(s)
+              }
             }
           }
         })
