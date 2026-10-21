@@ -219,9 +219,8 @@ export default {
                   new Error(
                     `timeout-limiter: the tool "${name}" was killed after ${limit}ms, ` +
                       `which is the hard limit for tool calls. The call was aborted, ` +
-                      `nothing else is running. Retry with a smaller scope, or change the ` +
-                      `limit with /set-timeout-limiter <seconds>s ` +
-                      `(/disable-timeout-limiter turns the limit off).`,
+                      `nothing else is running. Retry with a smaller scope, or raise ` +
+                      `the limit for the next call with the set_timeout_limit tool.`,
                   ),
                 )
               }, limit)

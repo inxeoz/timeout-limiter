@@ -9,8 +9,8 @@ the agent is told what happened, and the session keeps going. The limit is
 ```
 timeout-limiter: the tool "shell" was killed after 5000ms, which is the hard
 limit for tool calls. The call was aborted, nothing else is running. Retry with
-a smaller scope, or change the limit with /set-timeout-limiter <seconds>s
-(/disable-timeout-limiter turns the limit off).
+a smaller scope, or raise the limit for the next call with the
+set_timeout_limit tool.
 ```
 
 ## Why
@@ -28,7 +28,7 @@ This plugin puts the ceiling somewhere the model cannot move.
 - **The session survives a kill.** Only the offending call is aborted. The
   agent receives a message naming the limit and can retry with a smaller
   scope.
-- **A raise is always explicit and always short-lived.** `/set-timeout-limiter
+- **A raise is always explicit and always short-lived.** `/set_timeout_limiter
   15s` applies to the *next* tool call only, then the limit drops back to 5s.
   A temporary bump can no longer leave a session wide open.
 - **The model cannot opt itself out.** The disable switch, the reset mode, and
@@ -82,18 +82,27 @@ The plugin has no dependencies and installs nothing.
 
 These run in the opencode TUI. They show a toast and never wake the model.
 
+Every name the plugin exposes — commands and tools alike — is `lower_snake_case`,
+the shape models already use for tool names.
+
 | Command | What it does |
 | --- | --- |
-| `/show-timeout-limiter` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
-| `/set-timeout-limiter 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
-| `/disable-timeout-limiter` | Turn the limiter off. Tool calls are no longer killed. |
-| `/disable-per-toolcall-reset` | Make raised limits stick instead of applying to one call. |
-| `/enable-per-toolcall-reset` | Back to one-call raises (the default). |
-| `/exclude-timeout-tool <name...>` | Exempt tools from the limit, e.g. `/exclude-timeout-tool question task`. |
-| `/include-timeout-tool <name...>` | Put exempt tools back under the limit. |
+| `/show_timeout_limiter` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
+| `/set_timeout_limiter 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
+| `/disable_timeout_limiter` | Turn the limiter off. Tool calls are no longer killed. |
+| `/disable_per_toolcall_reset` | Make raised limits stick instead of applying to one call. |
+| `/enable_per_toolcall_reset` | Back to one-call raises (the default). |
+| `/exclude_timeout_tool <name...>` | Exempt tools from the limit, e.g. `/exclude_timeout_tool question task`. |
+| `/include_timeout_tool <name...>` | Put exempt tools back under the limit. |
 
 Durations accept `15s`, `15000ms`, `1m`, or a bare number of seconds. They are
 clamped to 100ms–10min.
+
+Type a command in the prompt and press Enter. The autocomplete list stays open
+while you type, so the first Enter accepts the completion and the second one
+runs the command. For a command that takes an argument, type the whole thing
+including the argument — `/set_timeout_limiter 15s` — and the command runs on
+the first Enter, because the space after the command name closes the list.
 
 ### Agent tools
 
