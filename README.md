@@ -98,11 +98,22 @@ the shape models already use for tool names.
 Durations accept `15s`, `15000ms`, `1m`, or a bare number of seconds. They are
 clamped to 100ms–10min.
 
-Type a command in the prompt and press Enter. The autocomplete list stays open
-while you type, so the first Enter accepts the completion and the second one
-runs the command. For a command that takes an argument, type the whole thing
-including the argument — `/set_timeout_limiter 15s` — and the command runs on
-the first Enter, because the space after the command name closes the list.
+Type the command in the prompt and press Enter. One Enter is enough, for
+commands with an argument too:
+
+```
+/set_timeout_limiter 15s⏎
+```
+
+The command list opens as soon as you type `/` and stays open while you type
+the name, and while it is open Enter is bound to "select" rather than
+"submit". For a command with no argument that is harmless — the first Enter
+accepts the entry and runs it. For a command with an argument, type the
+argument before you press Enter: the space after the command name closes the
+list, so the argument is not swallowed. Press Enter while the list is still
+open and it rewrites your line to `/set_timeout_limiter `, dropping the `15s`
+— in that case type the name only, press Enter, then type the argument and
+press Enter again.
 
 ### Agent tools
 
