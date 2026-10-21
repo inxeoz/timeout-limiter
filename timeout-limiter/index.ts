@@ -39,19 +39,6 @@ function saveState(state: State): void {
   }
 }
 
-// Accepts "15s", "15", "15000ms", "1m". Returns milliseconds, clamped.
-function parseDuration(raw: string): number | undefined {
-  const text = raw.trim().toLowerCase()
-  if (!text) return undefined
-  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/.exec(text)
-  if (!match) return undefined
-  const value = Number(match[1])
-  if (!Number.isFinite(value) || value <= 0) return undefined
-  const unit = match[2] ?? "s"
-  const ms = unit === "ms" ? value : unit === "m" ? value * 60_000 : value * 1_000
-  return Math.min(Math.max(Math.round(ms), MIN_LIMIT_MS), MAX_LIMIT_MS)
-}
-
 // A tool is excluded when its short name or its namespaced id matches.
 function matches(name: string, id: string, list: string[]): boolean {
   for (const entry of list) {
@@ -74,14 +61,6 @@ function describe(state: State): string {
 export default {
   id: "timeout-limiter",
   setup: async (ctx: any) => {
-    const report = (sessionID: string, text: string) => {
-      try {
-        return ctx.session.synthetic({ sessionID, text, description: "timeout-limiter" })
-      } catch {
-        return Promise.resolve()
-      }
-    }
-
     await ctx.tool.transform((editor: any) => {
       editor.add({
         name: "set_timeout_limit",
@@ -184,68 +163,8 @@ export default {
       })
     })
 
-    // Slash commands. They change the limit on disk, so the new value is live
-    // on the very next tool call, in every location.
-    await ctx.command.transform((editor: any) => {
-      editor.add({
-        name: "set-timeout-limiter",
-        description:
-          "Set the hard timeout limit applied to tool calls, e.g. /set-timeout-limiter 15s. " +
-          "Also re-enables the limiter when it was disabled.",
-        execute: async ({ sessionID, prompt }: any) => {
-          const raw = String(prompt?.text ?? "").trim()
-          const ms = parseDuration(raw)
-          if (!ms) {
-            await report(
-              sessionID,
-              `timeout-limiter: could not parse "${raw || "(empty)"}". Use a duration like 15s, 15000ms or 1m.`,
-            )
-            return
-          }
-          const state = loadState()
-          state.limitMs = ms
-          state.disabled = false
-          saveState(state)
-          await report(
-            sessionID,
-            `timeout-limiter: limit set to ${ms}ms (${ms / 1000}s). Limiter enabled.`,
-          )
-        },
-      })
-
-      editor.add({
-        name: "disable-timeout-limiter",
-        description:
-          "Turn the hard timeout limit off. Tool calls are no longer killed. " +
-          "Use /set-timeout-limiter <n>s to turn it back on.",
-        execute: async ({ sessionID }: any) => {
-          const state = loadState()
-          state.disabled = true
-          saveState(state)
-          await report(
-            sessionID,
-            "timeout-limiter: DISABLED. Tool calls are no longer killed. " +
-              "Use /set-timeout-limiter <n>s to turn the limit back on.",
-          )
-        },
-      })
-
-      editor.add({
-        name: "show-timeout-limiter",
-        description:
-          "Show the current timeout-limiter status: whether it is enabled, the hard " +
-          "limit for tool calls, and the tools that are excluded from it.",
-        execute: async ({ sessionID }: any) => {
-          await report(sessionID, describe(loadState()))
-        },
-      })
-    })
-
-    try {
-      await ctx.command.reload()
-    } catch {
-      // best effort
-    }
+    // Slash commands live in tui.ts: they run in the terminal, so they show
+    // the status without waking the model and without touching the session.
 
     // Deadline for every tool call. The call is aborted and fails with a
     // message the agent can act on; the session keeps running.

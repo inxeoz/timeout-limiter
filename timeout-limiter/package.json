@@ -1,0 +1,8 @@
+{
+  "name": "timeout-limiter",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.ts"
+  }
+}
