@@ -5,6 +5,7 @@ import { join } from "node:path"
 const STATE_DIR = join(homedir(), ".config", "opencode")
 const STATE_FILE = join(STATE_DIR, "timeout-limiter.json")
 const DEFAULT_LIMIT_MS = 5_000
+const DEFAULT_CEILING_MS = 180_000
 const DEFAULT_EXCLUDED = ["question", "task"]
 const MIN_LIMIT_MS = 100
 const MAX_LIMIT_MS = 600_000
@@ -16,6 +17,7 @@ const PLUGIN_TOOLS = new Set(["timeout_limit_set", "timeout_limit_status"])
 
 type State = {
   limitMs: number
+  ceilingMs: number
   excluded: string[]
   disabled: boolean
   perToolCallReset: boolean
@@ -32,11 +34,21 @@ function loadState(): State {
       typeof parsed.limitMs === "number" && parsed.limitMs > 0
         ? Math.min(Math.max(parsed.limitMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
         : DEFAULT_LIMIT_MS
+    const ceilingMsRaw =
+      typeof parsed.ceilingMs === "number" && parsed.ceilingMs > 0
+        ? Math.min(Math.max(parsed.ceilingMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
+        : DEFAULT_CEILING_MS
     const excluded = Array.isArray(parsed.excluded)
       ? parsed.excluded.filter((x): x is string => typeof x === "string")
       : [...DEFAULT_EXCLUDED]
+    // Ceiling is the absolute max: never below the configured base/one-shot.
+    const ceilingMs = Math.min(
+      Math.max(ceilingMsRaw, limitMs, typeof parsed.oneShotMs === "number" ? parsed.oneShotMs : 0),
+      MAX_LIMIT_MS,
+    )
     return {
       limitMs,
+      ceilingMs,
       excluded,
       disabled: parsed.disabled === true,
       perToolCallReset: parsed.perToolCallReset !== false,
@@ -48,6 +60,7 @@ function loadState(): State {
   } catch {
     return {
       limitMs: DEFAULT_LIMIT_MS,
+      ceilingMs: DEFAULT_CEILING_MS,
       excluded: [...DEFAULT_EXCLUDED],
       disabled: false,
       perToolCallReset: true,
@@ -91,6 +104,7 @@ function describe(state: State): string {
   const lines = [
     `timeout-limiter: ${status}`,
     `  normal limit: ${state.limitMs}ms (${state.limitMs / 1000}s)`,
+    `  agent ceiling: ${state.ceilingMs}ms (${state.ceilingMs / 1000}s)`,
   ]
   if (state.oneShotMs) {
     lines.push(`  next call only: ${state.oneShotMs}ms (${state.oneShotMs / 1000}s)`)
@@ -121,23 +135,29 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
-          const ms = Math.min(
+          const requested = Math.min(
             Math.max(Math.round(Number(input.time_in_sec) * 1000), MIN_LIMIT_MS),
             MAX_LIMIT_MS,
           )
           const state = loadState()
+          const ceiling = state.ceilingMs
+          const clamped = requested > ceiling
+          const ms = Math.min(requested, ceiling)
           if (state.perToolCallReset) {
             state.oneShotMs = ms
           } else {
-            state.limitMs = ms
+            state.limitMs = Math.min(ms, ceiling)
           }
           state.disabled = false
           saveState(state)
+          const suffix = clamped
+            ? ` (clamped to agent ceiling ${ceiling}ms (${ceiling / 1000}s); only the user can raise it with /timeout_limit_ceiling)`
+            : ""
           return {
             content: state.perToolCallReset
-              ? `Next tool call only: ${ms}ms (${ms / 1000}s). Limiter enabled. Reverts to ${state.limitMs}ms after.`
-              : `Hard timeout limit set to ${ms}ms (persistent). Limiter enabled.`,
-            metadata: { limitMs: state.limitMs, oneShotMs: state.oneShotMs, disabled: false },
+              ? `Next tool call only: ${ms}ms (${ms / 1000}s). Limiter enabled. Reverts to ${state.limitMs}ms after.${suffix}`
+              : `Hard timeout limit set to ${ms}ms (persistent). Limiter enabled.${suffix}`,
+            metadata: { limitMs: state.limitMs, oneShotMs: state.oneShotMs, disabled: false, ceilingMs: ceiling, clamped },
           }
         },
       })
@@ -163,6 +183,7 @@ export default {
               disabled: state.disabled,
               perToolCallReset: state.perToolCallReset,
               excluded: state.excluded,
+              ceilingMs: state.ceilingMs,
             },
           }
         },
@@ -180,6 +201,10 @@ export default {
         const name: string = tool.name ?? id
         const original = tool.execute
         if (typeof original !== "function") continue
+
+        // Never wrap interactive tools — their TUI dialog contract must keep
+        // the original execute untouched (see DEFAULT_EXCLUDED).
+        if (matches(name, id, loadState().excluded)) continue
 
         editor.update(id, (definition: any) => {
           definition.execute = async (input: any, context: any) => {

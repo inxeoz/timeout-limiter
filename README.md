@@ -89,6 +89,7 @@ the shape models already use for tool names.
 | --- | --- |
 | `/timeout_limit_show` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
 | `/timeout_limit_set 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
+| `/timeout_limit_ceiling 3m` | Set the highest limit an agent may request. Agent raises are clamped to it; only the user can raise it. |
 | `/timeout_limit_disable` | Turn the limiter off. Tool calls are no longer killed. |
 | `/timeout_limit_disable_reset` | Make raised limits stick instead of applying to one call. |
 | `/timeout_limit_enable_reset` | Back to one-call raises (the default). |
@@ -142,6 +143,7 @@ it. If the model needs longer, it raises the limit for one call.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `limitMs` | `5000` | The hard limit for a tool call. |
+| `ceilingMs` | `180000` | The highest limit an agent may request. Agent raises are clamped to it. |
 | `excluded` | `["question", "task"]` | Tools that are not limited: interactive prompts and subagent sessions. |
 | `disabled` | `false` | Whether the limiter is off. |
 | `perToolCallReset` | `true` | Whether a raise applies to one call or sticks. |

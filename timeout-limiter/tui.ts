@@ -6,12 +6,14 @@ import { join } from "node:path"
 const STATE_DIR = join(homedir(), ".config", "opencode")
 const STATE_FILE = join(STATE_DIR, "timeout-limiter.json")
 const DEFAULT_LIMIT_MS = 5_000
+const DEFAULT_CEILING_MS = 180_000
 const DEFAULT_EXCLUDED = ["question", "task"]
 const MIN_LIMIT_MS = 100
 const MAX_LIMIT_MS = 600_000
 
 type State = {
   limitMs: number
+  ceilingMs: number
   excluded: string[]
   disabled: boolean
   perToolCallReset: boolean
@@ -26,11 +28,20 @@ function loadState(): State {
       typeof parsed.limitMs === "number" && parsed.limitMs > 0
         ? Math.min(Math.max(parsed.limitMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
         : DEFAULT_LIMIT_MS
+    const ceilingMsRaw =
+      typeof parsed.ceilingMs === "number" && parsed.ceilingMs > 0
+        ? Math.min(Math.max(parsed.ceilingMs, MIN_LIMIT_MS), MAX_LIMIT_MS)
+        : DEFAULT_CEILING_MS
     const excluded = Array.isArray(parsed.excluded)
       ? parsed.excluded.filter((x): x is string => typeof x === "string")
       : [...DEFAULT_EXCLUDED]
+    const ceilingMs = Math.min(
+      Math.max(ceilingMsRaw, limitMs, typeof parsed.oneShotMs === "number" ? parsed.oneShotMs : 0),
+      MAX_LIMIT_MS,
+    )
     return {
       limitMs,
+      ceilingMs,
       excluded,
       disabled: parsed.disabled === true,
       perToolCallReset: parsed.perToolCallReset !== false,
@@ -42,6 +53,7 @@ function loadState(): State {
   } catch {
     return {
       limitMs: DEFAULT_LIMIT_MS,
+      ceilingMs: DEFAULT_CEILING_MS,
       excluded: [...DEFAULT_EXCLUDED],
       disabled: false,
       perToolCallReset: true,
@@ -73,7 +85,7 @@ function parseDuration(raw: string): number | undefined {
 
 function summary(state: State): string {
   const status = state.disabled ? "DISABLED" : "ENABLED"
-  const parts = [`${status}`, `limit ${state.limitMs}ms (${state.limitMs / 1000}s)`]
+  const parts = [`${status}`, `limit ${state.limitMs}ms (${state.limitMs / 1000}s)`, `ceiling ${state.ceilingMs}ms (${state.ceilingMs / 1000}s)`]
   if (state.oneShotMs) {
     parts.push(`next call: ${state.oneShotMs}ms (${state.oneShotMs / 1000}s)`)
   }
@@ -126,6 +138,7 @@ export default Plugin.define({
             const state = loadState()
             if (state.perToolCallReset) {
               state.oneShotMs = ms
+              if (ms > state.ceilingMs) state.ceilingMs = ms
               state.disabled = false
               saveState(state)
               context.ui.toast.show({
@@ -136,6 +149,7 @@ export default Plugin.define({
               })
             } else {
               state.limitMs = ms
+              if (ms > state.ceilingMs) state.ceilingMs = ms
               state.disabled = false
               saveState(state)
               context.ui.toast.show({
@@ -145,6 +159,37 @@ export default Plugin.define({
                 duration: 5000,
               })
             }
+          },
+        },
+        {
+          id: "timeout-limiter.ceiling",
+          title: "Set agent timeout ceiling",
+          group: "Timeout limiter",
+          slash: { name: "timeout_limit_ceiling", arguments: true },
+          enabled: () => true,
+          run: (input) => {
+            const raw = String(input ?? "").trim()
+            const ms = parseDuration(raw)
+            if (!ms) {
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: `Could not parse "${raw || "(empty)"}". Use a duration like 3m, 180000ms or 180s.`,
+                variant: "warning",
+                duration: 8000,
+              })
+              return
+            }
+            const state = loadState()
+            state.ceilingMs = ms
+            if (state.limitMs > ms) state.limitMs = ms
+            if (state.oneShotMs && state.oneShotMs > ms) state.oneShotMs = ms
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: `Agent ceiling set to ${ms}ms (${ms / 1000}s). Normal limit ${state.limitMs}ms.`,
+              variant: "success",
+              duration: 6000,
+            })
           },
         },
         {
