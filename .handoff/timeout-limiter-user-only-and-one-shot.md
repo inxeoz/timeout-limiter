@@ -4,16 +4,19 @@
 **Done when:** implemented, committed, and verified in a real TUI — agent has no way to disable the limiter, and a raised limit is consumed by the next tool call.
 
 ## Context for this task
-- **Status: implemented and committed** (`6ce0c7e` on `master` in the plugin repo; earlier: `e3a9b2f`, `feb3c6a`, `a8e104b`). Working tree clean.
+- **Status: implemented, committed** (see `git log`; the plugin repo is this repo, `master`). Working tree clean.
 - Plugin is two halves in one package dir: `index.ts` (server: tools + per-call deadline) and `tui.ts` (terminal: slash commands). `package.json` maps `exports: { ".": "./index.ts", "./tui": "./tui.ts" }`.
 - Registered in `~/.config/opencode/opencode.jsonc` under the **plural** `plugins` key with the absolute path to the package dir. It reports as `{server: true, tui: true}` — that flag is what makes the CLI load the TUI half.
 - State file `~/.config/opencode/timeout-limiter.json` is the single source of truth (read fresh per tool call; every location has its own plugin instance, so caching it caused flip-flopping between dirs). Current value: `limitMs 5000, excluded [question, task], disabled false, perToolCallReset true, oneShotMs null`.
-- **User-only is structural, not a check:** disable and the per-tool-call-reset toggles exist only in `tui.ts` (client-side). There is no server command and no tool for them, so an agent has no path to them.
+- **User-only is structural, not a check:** every control that decides *whether* a tool call is bounded lives in `tui.ts` (client-side). There is no server command and no tool for them, so an agent has no path to them.
 
 ### Decisions (do not relitigate)
 - Commands live in the **TUI plugin**, not the server. A server-side command that reports via `ctx.session.synthetic` wakes the model (the endpoint "schedules execution"); with `resume: false` the message never reaches the transcript. The TUI plugin runs in the client: it reads/writes the state file and shows a toast. No agent turn, no session message.
 - The shell timeout clamp happens **inside the wrapper**, not in the `execute.before` hook: the hook mutates a copy, so the tool never saw the clamped value and processes outlived the limit.
 - The one-shot is consumed after the call (success, failure, or kill) and only by non-excluded tools — a `question` prompt must not waste it.
+- The one-shot is consumed **only by the value that was actually used**: if the limit is raised again while a call is running, the newer value survives. Without this, a second `set_timeout_limit` silently erased the first.
+- The plugin's **own** tools (`set_timeout_limit`, `timeout_limiter_status`) do not consume the one-shot. They only read and write the state file; spending the pending raise on introspection would waste it.
+- The **exclusion list is user-only too** (`/exclude-timeout-tool`, `/include-timeout-tool`). The old `timeout_exclude_tools` / `timeout_include_tools` agent tools let the agent exclude every tool, which is functionally the same as switching the limiter off and broke the "no agent path to disable" guarantee. The agent's remaining tools are `set_timeout_limit` (raises the limit for one call, never disables) and `timeout_limiter_status`.
 
 ### Ruled out (will waste time if retried)
 - Server-side `ctx.command.transform` commands for these three names → agent gets woken.
@@ -22,40 +25,30 @@
 - Plugin directories are not auto-discovered by the server in v2.0.29; they must be listed in `plugins`.
 
 ### Gotchas
-- Plugin **code** changes need `opencode service restart` (the file watcher does not reload plugin modules). The TUI half needs a **TUI restart** — CLI plugins load at client start.
-- In the TUI, the autocomplete dropdown swallows the first Enter. Type the command, then Enter (accepts) and Enter again (runs), or press Escape first, then Enter. For an argument command, ESC then Enter is the reliable path.
+- The **server half hot-reloads** in v2.0.29: edit `index.ts` and the next tool call already uses the new code. Edit the file in one piece — a half-written file makes the next tool call fail with a `ReferenceError` from the plugin. The **TUI half still needs a TUI restart** (the CLI loads client plugins at start).
+- In the TUI, the autocomplete dropdown swallows the first Enter. Type the command, then Enter (accepts) and Enter again (runs); for a command with an argument, ESC then Enter is the reliable path.
 - `opencode --standalone` has no `--standalone` flag (it is `opencode run --standalone`); that path sends the text as a prompt, so it is useless for testing slash commands.
-- The `code-mode` `execute` tool can call the plugin's own tools with no LLM involved — the fastest way to test state transitions.
+- The `code-mode` `execute` tool can call the plugin's own tools with no LLM involved — the fastest way to test state transitions. The `execute` tool itself is not limited (`index.ts` skips `execute`).
+- The limiter also applies to **background** shell calls, so a long verification script needs a raised limit first (`set_timeout_limit`) or it is killed at 5s.
+- `opencode --standalone`… see above.
 
-## Pointers
+### Pointers
 - `timeout-limiter/index.ts:22` `loadState()` — reads the state file fresh, applies defaults for missing fields (old files lack `perToolCallReset`/`oneShotMs`).
-- `timeout-limiter/index.ts:104` `set_timeout_limit` tool — agent-facing; one-shot when `perToolCallReset` is on, persistent when off.
-- `timeout-limiter/index.ts:225` tool wrapper — picks `oneShotMs ?? limitMs`, clamps the shell timeout, and consumes the one-shot at `:276`.
-- `timeout-limiter/tui.ts:95` `show-timeout-limiter`, `:112` `set-timeout-limiter`, `:154` `disable-timeout-limiter`, `:172` `disable-per-toolcall-reset`, `:190` `enable-per-toolcall-reset` — all terminal-side, user-only.
+- `timeout-limiter/index.ts:114` `set_timeout_limit` tool — agent-facing; one-shot when `perToolCallReset` is on, persistent when off. It only ever *re-enables* the limiter.
+- `timeout-limiter/index.ts:238` tool wrapper — picks `oneShotMs ?? limitMs`, clamps the shell timeout, and consumes the one-shot in the `finally`.
+- `timeout-limiter/tui.ts:95` `show-timeout-limiter`, `:112` `set-timeout-limiter`, `:154` `disable-timeout-limiter`, `:172` `exclude-timeout-tool` / `include-timeout-tool`, `:190` `disable-per-toolcall-reset`, `:210` `enable-per-toolcall-reset` — all terminal-side, user-only.
 - `/home/inxeoz/chill.md` — the prose describing the plugin (the old `/home/inxeoz/AGENTS.md` was removed by the user, backup at `AGENTS.md.bk`).
 
-## Commands
-- Reload the server: `opencode service restart` (interrupts the calling tool call; the session survives).
+### Commands
 - Check what is loaded: `opencode api get /api/plugin | grep timeout` → expect `features {server: true, tui: true}`, status `active`.
+- Check the server exposes no timeout command: `opencode api get /api/command` → no `timeout` entries.
 - Read state: `cat ~/.config/opencode/timeout-limiter.json`.
-- Drive a real TUI in a pty (no LLM needed):
-  `bash -c '(sleep 8; printf "/show-timeout-limiter"; sleep 3; printf "\r"; sleep 3; printf "\r"; sleep 7) | script -qec "timeout 24 opencode" /dev/null' > /tmp/opencode/tui.log` then grep the log for `ENABLED`.
+- Drive a real TUI in a pty (no LLM needed) — raise the limit first, the script runs longer than 5s:
+  `execute: tools.set_timeout_limit({time_in_sec: 60})`, then
+  `bash -c '(sleep 12; printf "/show-timeout-limiter"; sleep 2; printf "\r"; sleep 1; printf "\r"; sleep 8) | cat' | script -qec "timeout 40 opencode" /dev/null > /tmp/opencode/tui.log`
+  then grep the log for `ENABLED`.
 
 ## Open (?)
 - `~/.config/opencode/plugins/probe.ts` is the user's leftover debug plugin (writes `/tmp/opencode/probe-global.txt` on every load). Not touched — offer to remove it.
 - The persistent normal limit is 5s by default; there is no user command to change it while per-tool-call reset is on (turn the reset off to set it persistently).
-
----
-
-## Task
-**Goal:** Make the timeout limiter's disable switch user-only and make raised limits one-shot by default.
-**Done:**
-- [x] `/disable-timeout-limiter` reachable only from the terminal; no server command, no agent tool
-- [x] `/set-timeout-limiter 15s` (and the agent's `set_timeout_limit`) applies to the next tool call only, then reverts
-- [x] One-shot on by default (`perToolCallReset: true`); `/disable-per-toolcall-reset` and `/enable-per-toolcall-reset` toggle it, user-only
-- [x] Verified in a real TUI: toast shows the status, one-shot consumed by the next call
-- [x] Committed (`6ce0c7e`)
-**Constraints:** no agent-reachable path to disable; state file stays the single source of truth; server plugin code must not break the CLI's `features.tui` detection.
-**Start:** `timeout-limiter/index.ts:225` — the wrapper that resolves the effective limit and consumes the one-shot.
-**Out of scope:** the leftover `probe.ts` plugin; changing the 5s default.
-**First step:** if more work is needed, read `timeout-limiter/index.ts:225` and `timeout-limiter/tui.ts:95`, then `opencode service restart` and re-verify in a pty-driven TUI.
+- The state file lives in `~/.config/opencode/`, which the agent can also write with the generic `write` tool. The plugin cannot stop that; only a permission rule or a different location would.

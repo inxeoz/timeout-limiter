@@ -9,6 +9,11 @@ const DEFAULT_EXCLUDED = ["question", "task"]
 const MIN_LIMIT_MS = 100
 const MAX_LIMIT_MS = 600_000
 
+// The plugin's own tools only read and write the state file. They never need
+// the extra time of a one-shot raise, and they must not spend it: checking
+// the status or raising the limit again would waste the pending raise.
+const PLUGIN_TOOLS = new Set(["set_timeout_limit", "timeout_limiter_status"])
+
 type State = {
   limitMs: number
   excluded: string[]
@@ -104,7 +109,11 @@ export default {
         name: "set_timeout_limit",
         description:
           "Set the hard timeout limit (in seconds) applied to tool calls. " +
-          "Persisted across sessions. Also re-enables the limiter if it was disabled.",
+          "By default the limit applies to the next tool call only and then " +
+          "reverts to the normal limit; when the per-tool-call reset is off " +
+          "it is persistent. Also re-enables the limiter if it was disabled. " +
+          "The limiter itself can only be turned off by the user in the " +
+          "terminal.",
         input: {
           type: "object",
           properties: { time_in_sec: { type: "number" } },
@@ -134,60 +143,11 @@ export default {
       })
 
       editor.add({
-        name: "timeout_exclude_tools",
-        description:
-          "Exclude the given tools from the hard timeout (e.g. 'question' for " +
-          "interactive prompts). Accepts a list of tool names.",
-        input: {
-          type: "object",
-          properties: {
-            tools: { type: "array", items: { type: "string" } },
-          },
-          required: ["tools"],
-          additionalProperties: false,
-        },
-        execute: async (input: any) => {
-          const state = loadState()
-          const names = Array.isArray(input.tools) ? input.tools.map(String) : []
-          state.excluded = [...new Set([...state.excluded, ...names])]
-          saveState(state)
-          return {
-            content: `Excluded from timeout: ${state.excluded.join(", ") || "(none)"}.`,
-            metadata: { excluded: state.excluded },
-          }
-        },
-      })
-
-      editor.add({
-        name: "timeout_include_tools",
-        description:
-          "Re-enable the hard timeout for the given tools (remove them from the " +
-          "exclusion list).",
-        input: {
-          type: "object",
-          properties: {
-            tools: { type: "array", items: { type: "string" } },
-          },
-          required: ["tools"],
-          additionalProperties: false,
-        },
-        execute: async (input: any) => {
-          const state = loadState()
-          const names = Array.isArray(input.tools) ? input.tools.map(String) : []
-          state.excluded = state.excluded.filter((n) => !names.includes(n))
-          saveState(state)
-          return {
-            content: `Excluded from timeout: ${state.excluded.join(", ") || "(none)"}.`,
-            metadata: { excluded: state.excluded },
-          }
-        },
-      })
-
-      editor.add({
         name: "timeout_limiter_status",
         description:
-          "Show the current timeout-limiter status: whether it is enabled, the hard " +
-          "limit for tool calls, and the tools that are excluded from it.",
+          "Show the current timeout-limiter status: whether it is enabled, the limit " +
+          "for tool calls, the limit pending for the next call only, and the tools " +
+          "that are excluded from it.",
         input: {
           type: "object",
           properties: {},
@@ -225,14 +185,18 @@ export default {
           definition.execute = async (input: any, context: any) => {
             // Read fresh: the state is shared by every location.
             const state = loadState()
-            const limit = state.disabled ? 0 : (state.oneShotMs ?? state.limitMs)
+            const oneShot = state.disabled ? null : state.oneShotMs
+            const limit = state.disabled ? 0 : (oneShot ?? state.limitMs)
             const isExcluded = matches(name, id, state.excluded)
-            const oneShotUsed =
-              !state.disabled && !isExcluded && state.oneShotMs !== null
 
             if (!limit || isExcluded) {
               return original(input, context)
             }
+
+            // The one-shot belongs to the next real call, not to a call that
+            // only inspects or changes the state.
+            const consumesOneShot =
+              oneShot !== null && !PLUGIN_TOOLS.has(name) && !PLUGIN_TOOLS.has(id)
 
             // Shell timeouts are milliseconds. Clamp them here: the object we
             // mutate is the one the tool receives, so the tool kills the
@@ -272,11 +236,15 @@ export default {
               if (timer) clearTimeout(timer)
               // Consume the one-shot override after the call, whether it
               // succeeded, failed, or timed out. Excluded tools leave it in
-              // place for the next call.
-              if (oneShotUsed) {
+              // place for the next call. Only clear the value that was
+              // actually used: a raise set during the call is newer and must
+              // survive.
+              if (consumesOneShot) {
                 const s = loadState()
-                s.oneShotMs = null
-                saveState(s)
+                if (s.oneShotMs === oneShot) {
+                  s.oneShotMs = null
+                  saveState(s)
+                }
               }
             }
           }

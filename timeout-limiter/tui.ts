@@ -166,6 +166,69 @@ export default Plugin.define({
           },
         },
         {
+          id: "timeout-limiter.exclude",
+          title: "Exclude tools from the timeout limiter",
+          group: "Timeout limiter",
+          slash: { name: "exclude-timeout-tool", arguments: true },
+          enabled: () => true,
+          run: (input) => {
+            const names = String(input ?? "")
+              .split(/[\s,]+/)
+              .filter(Boolean)
+            if (names.length === 0) {
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: "Name at least one tool, e.g. /exclude-timeout-tool question task",
+                variant: "warning",
+                duration: 8000,
+              })
+              return
+            }
+            const state = loadState()
+            state.excluded = [...new Set([...state.excluded, ...names])]
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: `Not limited: ${state.excluded.join(", ")}`,
+              variant: "success",
+              duration: 6000,
+            })
+          },
+        },
+        {
+          id: "timeout-limiter.include",
+          title: "Include tools in the timeout limiter",
+          group: "Timeout limiter",
+          slash: { name: "include-timeout-tool", arguments: true },
+          enabled: () => true,
+          run: (input) => {
+            const names = String(input ?? "")
+              .split(/[\s,]+/)
+              .filter(Boolean)
+            if (names.length === 0) {
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: "Name at least one tool, e.g. /include-timeout-tool question",
+                variant: "warning",
+                duration: 8000,
+              })
+              return
+            }
+            const state = loadState()
+            const removed = state.excluded.filter((n) => names.includes(n))
+            state.excluded = state.excluded.filter((n) => !names.includes(n))
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: removed.length
+                ? `Limited again: ${removed.join(", ")}`
+                : "Those tools were not excluded.",
+              variant: "success",
+              duration: 6000,
+            })
+          },
+        },
+        {
           id: "timeout-limiter.reset-disable",
           title: "Disable per-tool-call reset",
           group: "Timeout limiter",
