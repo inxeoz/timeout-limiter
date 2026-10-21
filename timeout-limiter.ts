@@ -11,6 +11,8 @@ const MAX_LIMIT_MS = 600_000
 
 type State = { limitMs: number; excluded: string[]; disabled: boolean }
 
+// The state file is the only source of truth. Every location loads its own
+// copy of this plugin, so the file is read fresh instead of cached.
 function loadState(): State {
   try {
     const raw = readFileSync(STATE_FILE, "utf8")
@@ -50,27 +52,28 @@ function parseDuration(raw: string): number | undefined {
   return Math.min(Math.max(Math.round(ms), MIN_LIMIT_MS), MAX_LIMIT_MS)
 }
 
+// A tool is excluded when its short name or its namespaced id matches.
+function matches(name: string, id: string, list: string[]): boolean {
+  for (const entry of list) {
+    if (name === entry || id === entry || id.endsWith(`_${entry}`)) return true
+  }
+  return false
+}
+
+function describe(state: State): string {
+  return [
+    `timeout-limiter: ${state.disabled ? "DISABLED" : "ENABLED"}`,
+    `  limit: ${state.limitMs}ms (${state.limitMs / 1000}s)`,
+    `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
+    `  state file: ${STATE_FILE}`,
+    `  change it with /set-timeout-limiter <seconds>s,`,
+    `  turn it off with /disable-timeout-limiter, show it with /show-timeout-limiter`,
+  ].join("\n")
+}
+
 export default {
   id: "timeout-limiter",
   setup: async (ctx: any) => {
-    const state: State = loadState()
-    const excluded = new Set<string>(state.excluded)
-
-    const persist = () => saveState({ ...state, excluded: [...excluded] })
-    persist()
-
-    // Live limit. 0 means "no limit".
-    const limit = () => (state.disabled ? 0 : state.limitMs)
-
-    // A tool is excluded when its short name or its namespaced id matches.
-    const isExcluded = (id: string): boolean => {
-      if (excluded.has(id)) return true
-      for (const name of excluded) {
-        if (id === name || id.endsWith(`_${name}`)) return true
-      }
-      return false
-    }
-
     const report = (sessionID: string, text: string) => {
       try {
         return ctx.session.synthetic({ sessionID, text, description: "timeout-limiter" })
@@ -92,13 +95,17 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
-          const ms = Math.max(MIN_LIMIT_MS, Math.round(Number(input.time_in_sec) * 1000))
-          state.limitMs = Math.min(ms, MAX_LIMIT_MS)
+          const state = loadState()
+          const ms = Math.min(
+            Math.max(Math.round(Number(input.time_in_sec) * 1000), MIN_LIMIT_MS),
+            MAX_LIMIT_MS,
+          )
+          state.limitMs = ms
           state.disabled = false
-          persist()
+          saveState(state)
           return {
-            content: `Hard timeout limit set to ${state.limitMs}ms.`,
-            metadata: { limitMs: state.limitMs, disabled: false },
+            content: `Hard timeout limit set to ${ms}ms.`,
+            metadata: { limitMs: ms, disabled: false },
           }
         },
       })
@@ -117,12 +124,13 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
-          const names = Array.isArray(input.tools) ? input.tools : []
-          for (const n of names) excluded.add(String(n))
-          persist()
+          const state = loadState()
+          const names = Array.isArray(input.tools) ? input.tools.map(String) : []
+          state.excluded = [...new Set([...state.excluded, ...names])]
+          saveState(state)
           return {
-            content: `Excluded from timeout: ${[...excluded].join(", ") || "(none)"}.`,
-            metadata: { excluded: [...excluded] },
+            content: `Excluded from timeout: ${state.excluded.join(", ") || "(none)"}.`,
+            metadata: { excluded: state.excluded },
           }
         },
       })
@@ -141,19 +149,43 @@ export default {
           additionalProperties: false,
         },
         execute: async (input: any) => {
-          const names = Array.isArray(input.tools) ? input.tools : []
-          for (const n of names) excluded.delete(String(n))
-          persist()
+          const state = loadState()
+          const names = Array.isArray(input.tools) ? input.tools.map(String) : []
+          state.excluded = state.excluded.filter((n) => !names.includes(n))
+          saveState(state)
           return {
-            content: `Excluded from timeout: ${[...excluded].join(", ") || "(none)"}.`,
-            metadata: { excluded: [...excluded] },
+            content: `Excluded from timeout: ${state.excluded.join(", ") || "(none)"}.`,
+            metadata: { excluded: state.excluded },
+          }
+        },
+      })
+
+      editor.add({
+        name: "timeout_limiter_status",
+        description:
+          "Show the current timeout-limiter status: whether it is enabled, the hard " +
+          "limit for tool calls, and the tools that are excluded from it.",
+        input: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        execute: async () => {
+          const state = loadState()
+          return {
+            content: describe(state),
+            metadata: {
+              limitMs: state.limitMs,
+              disabled: state.disabled,
+              excluded: state.excluded,
+            },
           }
         },
       })
     })
 
-    // Slash commands. They change the limit in-process, so the new value is
-    // live on the very next tool call.
+    // Slash commands. They change the limit on disk, so the new value is live
+    // on the very next tool call, in every location.
     await ctx.command.transform((editor: any) => {
       editor.add({
         name: "set-timeout-limiter",
@@ -170,9 +202,10 @@ export default {
             )
             return
           }
+          const state = loadState()
           state.limitMs = ms
           state.disabled = false
-          persist()
+          saveState(state)
           await report(
             sessionID,
             `timeout-limiter: limit set to ${ms}ms (${ms / 1000}s). Limiter enabled.`,
@@ -186,13 +219,24 @@ export default {
           "Turn the hard timeout limit off. Tool calls are no longer killed. " +
           "Use /set-timeout-limiter <n>s to turn it back on.",
         execute: async ({ sessionID }: any) => {
+          const state = loadState()
           state.disabled = true
-          persist()
+          saveState(state)
           await report(
             sessionID,
             "timeout-limiter: DISABLED. Tool calls are no longer killed. " +
               "Use /set-timeout-limiter <n>s to turn the limit back on.",
           )
+        },
+      })
+
+      editor.add({
+        name: "show-timeout-limiter",
+        description:
+          "Show the current timeout-limiter status: whether it is enabled, the hard " +
+          "limit for tool calls, and the tools that are excluded from it.",
+        execute: async ({ sessionID }: any) => {
+          await report(sessionID, describe(loadState()))
         },
       })
     })
@@ -209,7 +253,6 @@ export default {
       for (const tool of editor.list()) {
         const id: string = tool.id
         if (typeof id !== "string" || !id) continue
-        if (isExcluded(id)) continue
         // The code mode entry point runs a whole program; do not bound it.
         if (id === "execute" || id.endsWith("_execute")) continue
         const name: string = tool.name ?? id
@@ -218,15 +261,19 @@ export default {
 
         editor.update(id, (definition: any) => {
           definition.execute = async (input: any, context: any) => {
-            const ms = limit()
-            if (!ms) return original(input, context)
+            // Read fresh: the state is shared by every location.
+            const state = loadState()
+            const limit = state.disabled ? 0 : state.limitMs
+            if (!limit || matches(name, id, state.excluded)) {
+              return original(input, context)
+            }
 
             // Shell timeouts are milliseconds. Clamp them here: the object we
             // mutate is the one the tool receives, so the tool kills the
             // process itself when the limit is reached.
             if ((name === "shell" || name === "bash") && input && typeof input === "object") {
-              const requested = typeof input.timeout === "number" ? input.timeout : ms
-              input.timeout = Math.min(requested, ms)
+              const requested = typeof input.timeout === "number" ? input.timeout : limit
+              input.timeout = Math.min(requested, limit)
             }
 
             const controller = new AbortController()
@@ -240,14 +287,14 @@ export default {
                 controller.abort()
                 reject(
                   new Error(
-                    `timeout-limiter: the tool "${name}" was killed after ${ms}ms, ` +
+                    `timeout-limiter: the tool "${name}" was killed after ${limit}ms, ` +
                       `which is the hard limit for tool calls. The call was aborted, ` +
                       `nothing else is running. Retry with a smaller scope, or change the ` +
                       `limit with /set-timeout-limiter <seconds>s ` +
                       `(/disable-timeout-limiter turns the limit off).`,
                   ),
                 )
-              }, ms)
+              }, limit)
             })
 
             try {
