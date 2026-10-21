@@ -95,7 +95,7 @@ export default Plugin.define({
           id: "timeout-limiter.show",
           title: "Show timeout limiter status",
           group: "Timeout limiter",
-          slash: { name: "show_timeout_limiter" },
+          slash: { name: "timeout_limit_show" },
           enabled: () => true,
           run: () => {
             context.ui.toast.show({
@@ -109,7 +109,7 @@ export default Plugin.define({
           id: "timeout-limiter.set",
           title: "Set timeout limiter limit",
           group: "Timeout limiter",
-          slash: { name: "set_timeout_limiter", arguments: true },
+          slash: { name: "timeout_limit_set", arguments: true },
           enabled: () => true,
           run: (input) => {
             const raw = String(input ?? "").trim()
@@ -151,7 +151,7 @@ export default Plugin.define({
           id: "timeout-limiter.disable",
           title: "Disable timeout limiter",
           group: "Timeout limiter",
-          slash: { name: "disable_timeout_limiter" },
+          slash: { name: "timeout_limit_disable" },
           enabled: () => true,
           run: () => {
             const state = loadState()
@@ -159,7 +159,7 @@ export default Plugin.define({
             saveState(state)
             context.ui.toast.show({
               title: "timeout-limiter",
-              message: "DISABLED. Tool calls are no longer killed. Use /set_timeout_limiter <n>s to turn it back on.",
+              message: "DISABLED. Tool calls are no longer killed. Use /timeout_limit_set <n>s to turn it back on.",
               variant: "warning",
               duration: 8000,
             })
@@ -169,7 +169,7 @@ export default Plugin.define({
           id: "timeout-limiter.exclude",
           title: "Exclude tools from the timeout limiter",
           group: "Timeout limiter",
-          slash: { name: "exclude_timeout_tool", arguments: true },
+          slash: { name: "timeout_limit_exclude", arguments: true },
           enabled: () => true,
           run: (input) => {
             const names = String(input ?? "")
@@ -178,7 +178,7 @@ export default Plugin.define({
             if (names.length === 0) {
               context.ui.toast.show({
                 title: "timeout-limiter",
-                message: "Name at least one tool, e.g. /exclude_timeout_tool question task",
+                message: "Name at least one tool, e.g. /timeout_limit_exclude question task",
                 variant: "warning",
                 duration: 8000,
               })
@@ -199,7 +199,7 @@ export default Plugin.define({
           id: "timeout-limiter.include",
           title: "Include tools in the timeout limiter",
           group: "Timeout limiter",
-          slash: { name: "include_timeout_tool", arguments: true },
+          slash: { name: "timeout_limit_include", arguments: true },
           enabled: () => true,
           run: (input) => {
             const names = String(input ?? "")
@@ -208,7 +208,7 @@ export default Plugin.define({
             if (names.length === 0) {
               context.ui.toast.show({
                 title: "timeout-limiter",
-                message: "Name at least one tool, e.g. /include_timeout_tool question",
+                message: "Name at least one tool, e.g. /timeout_limit_include question",
                 variant: "warning",
                 duration: 8000,
               })
@@ -232,7 +232,7 @@ export default Plugin.define({
           id: "timeout-limiter.reset-disable",
           title: "Disable per-tool-call reset",
           group: "Timeout limiter",
-          slash: { name: "disable_per_toolcall_reset" },
+          slash: { name: "timeout_limit_disable_reset" },
           enabled: () => true,
           run: () => {
             const state = loadState()
@@ -240,7 +240,7 @@ export default Plugin.define({
             saveState(state)
             context.ui.toast.show({
               title: "timeout-limiter",
-              message: "Per-tool-call reset OFF. /set_timeout_limiter now sets a persistent limit.",
+              message: "Per-tool-call reset OFF. /timeout_limit_set now sets a persistent limit.",
               variant: "success",
               duration: 6000,
             })
@@ -250,7 +250,7 @@ export default Plugin.define({
           id: "timeout-limiter.reset-enable",
           title: "Enable per-tool-call reset",
           group: "Timeout limiter",
-          slash: { name: "enable_per_toolcall_reset" },
+          slash: { name: "timeout_limit_enable_reset" },
           enabled: () => true,
           run: () => {
             const state = loadState()
@@ -258,7 +258,7 @@ export default Plugin.define({
             saveState(state)
             context.ui.toast.show({
               title: "timeout-limiter",
-              message: "Per-tool-call reset ON. /set_timeout_limiter now applies to the next call only.",
+              message: "Per-tool-call reset ON. /timeout_limit_set now applies to the next call only.",
               variant: "success",
               duration: 6000,
             })

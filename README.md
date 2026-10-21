@@ -10,7 +10,7 @@ the agent is told what happened, and the session keeps going. The limit is
 timeout-limiter: the tool "shell" was killed after 5000ms, which is the hard
 limit for tool calls. The call was aborted, nothing else is running. Retry with
 a smaller scope, or raise the limit for the next call with the
-set_timeout_limit tool.
+timeout_limit_set tool.
 ```
 
 ## Why
@@ -28,7 +28,7 @@ This plugin puts the ceiling somewhere the model cannot move.
 - **The session survives a kill.** Only the offending call is aborted. The
   agent receives a message naming the limit and can retry with a smaller
   scope.
-- **A raise is always explicit and always short-lived.** `/set_timeout_limiter
+- **A raise is always explicit and always short-lived.** `/timeout_limit_set
   15s` applies to the *next* tool call only, then the limit drops back to 5s.
   A temporary bump can no longer leave a session wide open.
 - **The model cannot opt itself out.** The disable switch, the reset mode, and
@@ -87,13 +87,13 @@ the shape models already use for tool names.
 
 | Command | What it does |
 | --- | --- |
-| `/show_timeout_limiter` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
-| `/set_timeout_limiter 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
-| `/disable_timeout_limiter` | Turn the limiter off. Tool calls are no longer killed. |
-| `/disable_per_toolcall_reset` | Make raised limits stick instead of applying to one call. |
-| `/enable_per_toolcall_reset` | Back to one-call raises (the default). |
-| `/exclude_timeout_tool <name...>` | Exempt tools from the limit, e.g. `/exclude_timeout_tool question task`. |
-| `/include_timeout_tool <name...>` | Put exempt tools back under the limit. |
+| `/timeout_limit_show` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
+| `/timeout_limit_set 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
+| `/timeout_limit_disable` | Turn the limiter off. Tool calls are no longer killed. |
+| `/timeout_limit_disable_reset` | Make raised limits stick instead of applying to one call. |
+| `/timeout_limit_enable_reset` | Back to one-call raises (the default). |
+| `/timeout_limit_exclude <name...>` | Exempt tools from the limit, e.g. `/timeout_limit_exclude question task`. |
+| `/timeout_limit_include <name...>` | Put exempt tools back under the limit. |
 
 Durations accept `15s`, `15000ms`, `1m`, or a bare number of seconds. They are
 clamped to 100ms–10min.
@@ -102,7 +102,7 @@ Type the command in the prompt and press Enter. One Enter is enough, for
 commands with an argument too:
 
 ```
-/set_timeout_limiter 15s⏎
+/timeout_limit_set 15s⏎
 ```
 
 The command list opens as soon as you type `/` and stays open while you type
@@ -111,7 +111,7 @@ the name, and while it is open Enter is bound to "select" rather than
 accepts the entry and runs it. For a command with an argument, type the
 argument before you press Enter: the space after the command name closes the
 list, so the argument is not swallowed. Press Enter while the list is still
-open and it rewrites your line to `/set_timeout_limiter `, dropping the `15s`
+open and it rewrites your line to `/timeout_limit_set `, dropping the `15s`
 — in that case type the name only, press Enter, then type the argument and
 press Enter again.
 
@@ -121,8 +121,8 @@ The model gets exactly two:
 
 | Tool | What it does |
 | --- | --- |
-| `set_timeout_limit(time_in_sec)` | Raise the limit for the next tool call. It can re-enable the limiter, never disable it. |
-| `timeout_limiter_status()` | Read the same status the terminal shows. |
+| `timeout_limit_set(time_in_sec)` | Raise the limit for the next tool call. It can re-enable the limiter, never disable it. |
+| `timeout_limit_status()` | Read the same status the terminal shows. |
 
 The agent has no way to turn the limiter off, and no way to exempt a tool from
 it. If the model needs longer, it raises the limit for one call.
@@ -132,7 +132,7 @@ it. If the model needs longer, it raises the limit for one call.
 - It applies to the **next real tool call** and is spent afterwards, whether
   that call succeeded, failed, or was killed.
 - Exempt tools leave it pending — an interactive prompt does not waste it.
-- The plugin's own tools (`set_timeout_limit`, `timeout_limiter_status`) leave
+- The plugin's own tools (`timeout_limit_set`, `timeout_limit_status`) leave
   it pending — checking the status does not waste it.
 - Raising the limit again while a call is running does not erase the newer
   value.

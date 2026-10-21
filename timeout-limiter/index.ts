@@ -12,7 +12,7 @@ const MAX_LIMIT_MS = 600_000
 // The plugin's own tools only read and write the state file. They never need
 // the extra time of a one-shot raise, and they must not spend it: checking
 // the status or raising the limit again would waste the pending raise.
-const PLUGIN_TOOLS = new Set(["set_timeout_limit", "timeout_limiter_status"])
+const PLUGIN_TOOLS = new Set(["timeout_limit_set", "timeout_limit_status"])
 
 type State = {
   limitMs: number
@@ -106,7 +106,7 @@ export default {
   setup: async (ctx: any) => {
     await ctx.tool.transform((editor: any) => {
       editor.add({
-        name: "set_timeout_limit",
+        name: "timeout_limit_set",
         description:
           "Set the hard timeout limit (in seconds) applied to tool calls. " +
           "By default the limit applies to the next tool call only and then " +
@@ -143,7 +143,7 @@ export default {
       })
 
       editor.add({
-        name: "timeout_limiter_status",
+        name: "timeout_limit_status",
         description:
           "Show the current timeout-limiter status: whether it is enabled, the limit " +
           "for tool calls, the limit pending for the next call only, and the tools " +
@@ -220,7 +220,7 @@ export default {
                     `timeout-limiter: the tool "${name}" was killed after ${limit}ms, ` +
                       `which is the hard limit for tool calls. The call was aborted, ` +
                       `nothing else is running. Retry with a smaller scope, or raise ` +
-                      `the limit for the next call with the set_timeout_limit tool.`,
+                      `the limit for the next call with the timeout_limit_set tool.`,
                   ),
                 )
               }, limit)
