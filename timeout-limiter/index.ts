@@ -151,8 +151,8 @@ export default {
           state.disabled = false
           saveState(state)
           const suffix = clamped
-            ? ` (clamped to agent ceiling ${ceiling}ms (${ceiling / 1000}s); only the user can raise it with /timeout_limit_ceiling)`
-            : ""
+            ? ` (clamped to agent ceiling ${ceiling}ms (${ceiling / 1000}s); ask the user to increase the ceiling, decrease the scope, or change strategy)`
+            : ` (agent ceiling ${ceiling}ms (${ceiling / 1000}s))`
           return {
             content: state.perToolCallReset
               ? `Next tool call only: ${ms}ms (${ms / 1000}s). Limiter enabled. Reverts to ${state.limitMs}ms after.${suffix}`
@@ -244,8 +244,11 @@ export default {
                   new Error(
                     `timeout-limiter: the tool "${name}" was killed after ${limit}ms, ` +
                       `which is the hard limit for tool calls. The call was aborted, ` +
-                      `nothing else is running. Retry with a smaller scope, or raise ` +
-                      `the limit for the next call with the timeout_limit_set tool.`,
+                      `nothing else is running. Agent ceiling: ${state.ceilingMs}ms ` +
+                      `(${state.ceilingMs / 1000}s). Retry with a smaller scope, raise ` +
+                      `the limit for the next call with the timeout_limit_set tool, or ` +
+                      `ask the user to increase the ceiling, decrease the scope, or ` +
+                      `change strategy.`,
                   ),
                 )
               }, limit)

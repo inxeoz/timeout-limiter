@@ -8,9 +8,10 @@ the agent is told what happened, and the session keeps going. The limit is
 
 ```
 timeout-limiter: the tool "shell" was killed after 5000ms, which is the hard
-limit for tool calls. The call was aborted, nothing else is running. Retry with
-a smaller scope, or raise the limit for the next call with the
-timeout_limit_set tool.
+limit for tool calls. The call was aborted, nothing else is running. Agent
+ceiling: 180000ms (180s). Retry with a smaller scope, raise the limit for the
+next call with the timeout_limit_set tool, or ask the user to increase the
+ceiling, decrease the scope, or change strategy.
 ```
 
 ## Why
