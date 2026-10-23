@@ -150,13 +150,24 @@ export default {
           }
           state.disabled = false
           saveState(state)
-          const suffix = clamped
-            ? ` (clamped to agent ceiling ${ceiling}ms (${ceiling / 1000}s); ask the user to increase the ceiling, decrease the scope, or change strategy)`
-            : ` (agent ceiling ${ceiling}ms (${ceiling / 1000}s))`
+          const content = [
+            `timeout-limiter: SET`,
+            `  mode: ${state.perToolCallReset ? "next call only" : "persistent"}`,
+            `  new limit: ${ms}ms (${ms / 1000}s)`,
+            ...(state.perToolCallReset
+              ? [`  reverts to: ${state.limitMs}ms (${state.limitMs / 1000}s)`]
+              : []),
+            `  limiter: ENABLED`,
+            `  agent ceiling: ${ceiling}ms (${ceiling / 1000}s)`,
+            `  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`,
+            `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
+            `  state file: ${STATE_FILE}`,
+            clamped
+              ? `  clamped: yes (ask the user to increase the ceiling, decrease the scope, or change strategy)`
+              : `  clamped: no`,
+          ].join("\n")
           return {
-            content: state.perToolCallReset
-              ? `Next tool call only: ${ms}ms (${ms / 1000}s). Limiter enabled. Reverts to ${state.limitMs}ms after.${suffix}`
-              : `Hard timeout limit set to ${ms}ms (persistent). Limiter enabled.${suffix}`,
+            content,
             metadata: { limitMs: state.limitMs, oneShotMs: state.oneShotMs, disabled: false, ceilingMs: ceiling, clamped },
           }
         },
@@ -242,13 +253,19 @@ export default {
                 controller.abort()
                 reject(
                   new Error(
-                    `timeout-limiter: the tool "${name}" was killed after ${limit}ms, ` +
-                      `which is the hard limit for tool calls. The call was aborted, ` +
-                      `nothing else is running. Agent ceiling: ${state.ceilingMs}ms ` +
-                      `(${state.ceilingMs / 1000}s). Retry with a smaller scope, raise ` +
-                      `the limit for the next call with the timeout_limit_set tool, or ` +
-                      `ask the user to increase the ceiling, decrease the scope, or ` +
-                      `change strategy.`,
+                    [
+                      `timeout-limiter: KILLED`,
+                      `  tool: ${name}`,
+                      `  killed after: ${limit}ms (${limit / 1000}s)`,
+                      `  normal limit: ${state.limitMs}ms (${state.limitMs / 1000}s)`,
+                      ...(state.oneShotMs
+                        ? [`  next call only: ${state.oneShotMs}ms (${state.oneShotMs / 1000}s)`]
+                        : []),
+                      `  agent ceiling: ${state.ceilingMs}ms (${state.ceilingMs / 1000}s)`,
+                      `  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`,
+                      `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
+                      `  action: retry with a smaller scope, raise the limit for the next call with the timeout_limit_set tool, or ask the user to increase the ceiling, decrease the scope, or change strategy.`,
+                    ].join("\n"),
                   ),
                 )
               }, limit)
