@@ -111,7 +111,6 @@ function describe(state: State): string {
   }
   lines.push(`  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`)
   lines.push(`  excluded tools: ${state.excluded.join(", ") || "(none)"}`)
-  lines.push(`  state file: ${STATE_FILE}`)
   return lines.join("\n")
 }
 
@@ -161,7 +160,6 @@ export default {
             `  agent ceiling: ${ceiling}ms (${ceiling / 1000}s)`,
             `  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`,
             `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
-            `  state file: ${STATE_FILE}`,
             clamped
               ? `  clamped: yes (ask the user to increase the ceiling, decrease the scope, or change strategy)`
               : `  clamped: no`,
