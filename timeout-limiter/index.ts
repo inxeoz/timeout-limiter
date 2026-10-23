@@ -111,6 +111,7 @@ function describe(state: State): string {
   }
   lines.push(`  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`)
   lines.push(`  excluded tools: ${state.excluded.join(", ") || "(none)"}`)
+  lines.push(`  raise limit with: timeout_limit_set(time_in_sec)`)
   return lines.join("\n")
 }
 
@@ -160,6 +161,7 @@ export default {
             `  agent ceiling: ${ceiling}ms (${ceiling / 1000}s)`,
             `  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`,
             `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
+            `  raise further with: timeout_limit_set(time_in_sec)`,
             clamped
               ? `  clamped: yes (ask the user to increase the ceiling, decrease the scope, or change strategy)`
               : `  clamped: no`,
@@ -262,7 +264,7 @@ export default {
                       `  agent ceiling: ${state.ceilingMs}ms (${state.ceilingMs / 1000}s)`,
                       `  per-tool-call reset: ${state.perToolCallReset ? "on" : "off"}`,
                       `  excluded tools: ${state.excluded.join(", ") || "(none)"}`,
-                      `  action: retry with a smaller scope, raise the limit for the next call with the timeout_limit_set tool, or ask the user to increase the ceiling, decrease the scope, or change strategy.`,
+                      `  action: retry with a smaller scope; raise the limit for the next call with timeout_limit_set(time_in_sec); or ask the user to increase the ceiling, decrease the scope, or change strategy.`,
                     ].join("\n"),
                   ),
                 )
