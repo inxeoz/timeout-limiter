@@ -95,6 +95,7 @@ the shape models already use for tool names.
 | --- | --- |
 | `/timeout_limit_show` | Show the current status: enabled or disabled, the normal limit, any pending one-call limit, and the exempt tools. |
 | `/timeout_limit_set 15s` | Raise the limit. Applies to the next tool call only, then reverts. |
+| `/timeout_limit_default 30s` | Set the default normal limit (user-only; agents cannot change it). |
 | `/timeout_limit_ceiling 3m` | Set the highest limit an agent may request. Agent raises are clamped to it; only the user can raise it. |
 | `/timeout_limit_disable` | Turn the limiter off. Tool calls are no longer killed. |
 | `/timeout_limit_disable_reset` | Make raised limits stick instead of applying to one call. |

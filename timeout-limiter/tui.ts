@@ -309,6 +309,36 @@ export default Plugin.define({
             })
           },
         },
+        {
+          id: "timeout-limiter.default",
+          title: "Set default timeout limit",
+          group: "Timeout limiter",
+          slash: { name: "timeout_limit_default", arguments: true },
+          enabled: () => true,
+          run: (input) => {
+            const raw = String(input ?? "").trim()
+            const ms = parseDuration(raw)
+            if (!ms) {
+              context.ui.toast.show({
+                title: "timeout-limiter",
+                message: `Could not parse "${raw || "(empty)"}". Use a duration like 30s, 30000ms or 1m.`,
+                variant: "warning",
+                duration: 8000,
+              })
+              return
+            }
+            const state = loadState()
+            state.limitMs = ms
+            if (ms > state.ceilingMs) state.ceilingMs = ms
+            saveState(state)
+            context.ui.toast.show({
+              title: "timeout-limiter",
+              message: `Default limit set to ${ms}ms (${ms / 1000}s).`,
+              variant: "success",
+              duration: 6000,
+            })
+          },
+        },
       ],
     }))
   },
