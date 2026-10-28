@@ -49,6 +49,17 @@ This plugin puts the ceiling somewhere the model cannot move.
 Requires **opencode v2.0.29 or newer** (the TUI plugin API and the `plugins`
 config key).
 
+### Option A — `opencode plugin add` (recommended)
+
+```sh
+opencode plugin add git@github.com:inxeoz/timeout-limiter.git
+```
+
+This clones the package, registers it in your global config, and lets you
+update it later with `opencode plugin update timeout-limiter`.
+
+### Option B — manual (local path)
+
 1. Clone the repository:
 
    ```sh
@@ -61,24 +72,24 @@ config key).
    ```jsonc
    {
      "$schema": "https://opencode.ai/config.json",
-     "plugins": ["/absolute/path/to/timeout-limiter/timeout-limiter"]
+     "plugins": ["/absolute/path/to/timeout-limiter"]
    }
    ```
 
-   The value is the path to the `timeout-limiter/` directory that contains
-   `package.json`, not to the repository root.
+   The value is the path to the directory that contains `package.json`
+   (the repository root).
 
 3. Restart opencode. The server half loads on the next start; the terminal half
    loads when the TUI starts.
 
-4. Check that it loaded:
+### Verify (either option)
 
-   ```sh
-   opencode api get /api/plugin | grep timeout
-   ```
+```sh
+opencode api get /api/plugin | grep timeout
+```
 
-   You want to see `features {server: true, tui: true}` and status `active`.
-   The `tui: true` flag is what makes the CLI load the slash commands.
+You want to see `features {server: true, tui: true}` and status `active`.
+The `tui: true` flag is what makes the CLI load the slash commands.
 
 The plugin has no dependencies and installs nothing.
 
@@ -166,7 +177,7 @@ copy.
 The plugin is two halves in one package:
 
 ```
-timeout-limiter/
+timeout-limiter/            # repository root == package root
 ├── index.ts      # server half: the tool wrapper and the agent tools
 ├── tui.ts        # terminal half: the slash commands
 └── package.json  # exports: "." -> index.ts, "./tui" -> tui.ts

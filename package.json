@@ -1,0 +1,11 @@
+{
+  "name": "timeout-limiter",
+  "version": "1.0.0",
+  "description": "OpenCode plugin that puts a hard ceiling on how long any tool call may run.",
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.ts"
+  }
+}
